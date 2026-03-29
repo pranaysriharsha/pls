@@ -8,3 +8,7 @@ event*
 log*
 *.svg
 *.lock
+
+venv/
+*.egg-info/
+__pycache__/
