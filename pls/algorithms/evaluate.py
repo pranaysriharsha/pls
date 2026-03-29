@@ -2,7 +2,7 @@ import os
 import gym
 
 from pls.algorithms.ppo_shielded import PPO_shielded
-from stable_baselines3.common.evaluation import evaluate_policy
+import numpy as np
 
 
 def main(config_folder, config, model_at_step, n_test_episodes, monitor_cls):
@@ -37,14 +37,26 @@ def main(config_folder, config, model_at_step, n_test_episodes, monitor_cls):
 
     model = PPO_shielded.load(path, env)
 
-    # calls stable_baselines3's default evaluate_policy function
-    mean_reward, std_reward = evaluate_policy(
-        model=model,
-        env=env,
-        n_eval_episodes=n_test_episodes,
-        deterministic=False,
-        return_episode_rewards=False,
-        render=True,
-    )
+    episode_rewards = []
+    n_violations = 0
 
-    return mean_reward, std_reward
+    for _ in range(n_test_episodes):
+        obs = env.reset()
+        done = False
+        cumulative_reward = 0.0
+        while not done:
+            action, _ = model.predict(obs, deterministic=False)
+            obs, reward, done, info = env.step(action)
+            cumulative_reward += reward
+            env.render()
+            
+            if done:
+                if info.get("episode", {}).get("violate_constraint", False):
+                    n_violations += 1
+
+        episode_rewards.append(cumulative_reward)
+
+    mean_reward = np.mean(episode_rewards)
+    std_reward = np.std(episode_rewards)
+
+    return mean_reward, std_reward, n_violations

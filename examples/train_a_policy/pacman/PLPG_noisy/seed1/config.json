@@ -27,8 +27,14 @@
         "gamma": 0.99,
         "total_timesteps": 700000,
         "net_arch_shared": [],
-        "net_arch_pi": [64, 64],
-        "net_arch_vf": [64, 64],
+        "net_arch_pi": [
+            64,
+            64
+        ],
+        "net_arch_vf": [
+            64,
+            64
+        ],
         "alpha": 0
     },
     "policy_safety_params": {
