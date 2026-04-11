@@ -142,10 +142,14 @@ class Pacman_Callback(ConvertCallback):
             safe_next_shielded = self.shield.get_policy_safety(
                 debug_info["sensor_value"],
                 debug_info["shielded_policy"],
+                debug_info["prev_sensor"],
+                debug_info["prev_action"],
             )
             safe_next_base = self.shield.get_policy_safety(
                 debug_info["sensor_value"],
                 debug_info["base_policy"],
+                debug_info["prev_sensor"],
+                debug_info["prev_action"],
             )
 
         self.shielded_policy_safeties.append(safe_next_shielded)

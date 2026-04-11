@@ -56,6 +56,12 @@ class Shield:
             "action": [
                 i for i in range(self.num_sensors, self.num_sensors + self.num_actions)
             ],
+            "prev_sensor": [
+                i for i in range(self.num_sensors + self.num_actions, 2 * self.num_sensors + self.num_actions)
+            ],
+            "prev_action": [
+                i for i in range(2 * self.num_sensors + self.num_actions, 2 * self.num_sensors + 2 * self.num_actions)
+            ],
         }
 
         self.shield_layer = self.get_layer(
@@ -110,28 +116,34 @@ class Shield:
 
         return layer
 
-    def get_policy_safety(self, sensor_values, base_actions) -> th.Tensor:
+    def get_policy_safety(self, sensor_values, base_actions, prev_sensors, prev_actions) -> th.Tensor:
         """
         Compute how safe it is to follow the given policy given sensor values.
 
         :param sensor_values: tensor of sensor values (observed or ground truth)
         :param base_actions: tensor of the action probability distribution
+        :param prev_sensors: tensor of previous step sensor values
+        :param prev_actions: tensor of previous step action one-hot vector
         :return: probability representing safety
         """
         results = self.shield_layer(
             x={
                 "sensor_value": sensor_values,
                 "action": base_actions,
+                "prev_sensor": prev_sensors,
+                "prev_action": prev_actions,
             }
         )
         policy_safety = results["safe_next"]
         return policy_safety
 
-    def get_action_safeties(self, sensor_values) -> th.Tensor:
+    def get_action_safeties(self, sensor_values, prev_sensors, prev_actions) -> th.Tensor:
         """
         Compute how safe it is to execute an action.
 
         :param sensor_values: tensor of sensor values (observed or ground truth)
+        :param prev_sensors: tensor of previous step sensor values
+        :param prev_actions: tensor of previous step action one-hot vector
         :return: tensor of probabilities representing safety of actions
         """
         all_actions = th.eye(self.num_actions).unsqueeze(1)
@@ -142,6 +154,8 @@ class Shield:
                 x={
                     "sensor_value": sensor_values,
                     "action": base_actions,
+                    "prev_sensor": prev_sensors,
+                    "prev_action": prev_actions,
                 }
             )
             action_safety = results["safe_next"]
@@ -149,19 +163,21 @@ class Shield:
         action_safeties = th.cat(action_safeties, dim=1)
         return action_safeties
 
-    def get_shielded_policy(self, base_actions, sensor_values) -> th.Tensor:
+    def get_shielded_policy(self, base_actions, sensor_values, prev_sensors, prev_actions) -> th.Tensor:
         """
         Compute the shielded policy. This function is for differentiable shields.
 
         :param base_actions: tensor of the action probability distribution
         :param sensor_values: tensor of sensor values (observed or ground truth)
+        :param prev_sensors: tensor of previous step sensor values
+        :param prev_actions: tensor of previous step action one-hot vector
         :return: tensor representing the shielded policy
         """
 
         assert self.differentiable is True
 
-        policy_safety = self.get_policy_safety(sensor_values, base_actions)
-        action_safeties = self.get_action_safeties(sensor_values)
+        policy_safety = self.get_policy_safety(sensor_values, base_actions, prev_sensors, prev_actions)
+        action_safeties = self.get_action_safeties(sensor_values, prev_sensors, prev_actions)
         actions = action_safeties * base_actions / policy_safety
 
         assert actions.max() <= 1.00001, f"{actions} violates MAX"
@@ -169,13 +185,15 @@ class Shield:
 
         return actions
 
-    def get_shielded_policy_vsrl(self, base_actions, sensor_values) -> th.Tensor:
+    def get_shielded_policy_vsrl(self, base_actions, sensor_values, prev_sensors, prev_actions) -> th.Tensor:
         """
         Compute the shielded policy. This function is an implementation of vsrl
         (a non-differentiable shield).
 
         :param base_actions: tensor of the action probability distribution
         :param sensor_values: tensor of sensor values (observed or ground truth)
+        :param prev_sensors: tensor of previous step sensor values
+        :param prev_actions: tensor of previous step action one-hot vector
         :return: tensor representing the shielded policy
         """
 
@@ -189,7 +207,7 @@ class Shield:
                 action_safeties = th.ones((sensor_values.size(0), self.num_actions))
             else:
                 # turn on the shield
-                action_safeties = self.get_action_safeties(sensor_values)
+                action_safeties = self.get_action_safeties(sensor_values, prev_sensors, prev_actions)
                 # vsrl requires all actions to be either safe or unsafe
                 action_safeties = (action_safeties > 0.5).float()
 

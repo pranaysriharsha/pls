@@ -21,7 +21,7 @@
         "seed": 567,
         "clip_range": 0.1,
         "gamma": 0.99,
-        "total_timesteps": 700000,
+        "total_timesteps": 5000,
         "net_arch_shared": [],
         "net_arch_pi": [
             64,

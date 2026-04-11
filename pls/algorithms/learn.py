@@ -62,19 +62,35 @@ def main(
     new_logger = configure(config_folder, ["log", "tensorboard"])
 
     # initialize the environment
-    env = gym.make(config["env"], **config["env_features"])
+    from gym.wrappers import FrameStack
+    from stable_baselines3.common.vec_env import DummyVecEnv, VecTransposeImage
 
-    if config["monitor_features"] is not None:
-        env = monitor_cls(
-            env,
-            allow_early_resets=False,
-            **config["monitor_features"]
-        )
-    else:
-        env = monitor_cls(
-            env,
-            allow_early_resets=False
-        )
+    # function to create env (IMPORTANT)
+    def make_env():
+        env = gym.make(config["env"], **config["env_features"])
+        # FrameStack only works with Box observation spaces, not Dict
+        if not isinstance(env.observation_space, gym.spaces.Dict):
+            env = FrameStack(env, 4)
+            
+        if config["monitor_features"] is not None:
+            env = monitor_cls(
+                env,
+                allow_early_resets=False,
+                **config["monitor_features"]
+            )
+        else:
+            env = monitor_cls(
+                env,
+                allow_early_resets=False
+            )
+        return env
+
+    # create vectorized env
+    env = DummyVecEnv([make_env])
+
+    # convert (H, W, C) -> (C, H, W)
+    if config["env"] != "CarRacingPLS-v1":
+        env = VecTransposeImage(env)
 
     # create a callback for logging
 

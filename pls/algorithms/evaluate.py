@@ -48,7 +48,8 @@ def main(config_folder, config, model_at_step, n_test_episodes, monitor_cls):
             action, _ = model.predict(obs, deterministic=False)
             obs, reward, done, info = env.step(action)
             cumulative_reward += reward
-            env.render()
+            if config.get("render", False):
+                env.render()
             
             if done:
                 if info.get("episode", {}).get("violate_constraint", False):

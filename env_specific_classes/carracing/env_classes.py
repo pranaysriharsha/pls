@@ -36,8 +36,7 @@ class Carracing_FeaturesExtractor(BaseFeaturesExtractor):
         )
 
         self._features_dim = features_dim  # This is the size of the output
-        n_stacked_images, _, _ = observation_space.shape
-        assert n_stacked_images == 4
+        n_stacked_images = observation_space.shape[0]
         self.conv1 = nn.Conv2d(
             in_channels=n_stacked_images,
             out_channels=8,
@@ -62,6 +61,15 @@ class Carracing_FeaturesExtractor(BaseFeaturesExtractor):
         :param x: tensor representing the states to extract features from.
         :return: Tensor representing a compressed view of the input image. Intended to be used for the policy
         """
+
+        if x.dim() == 5:
+            if x.shape[-1] == 3:
+                x = x.mean(dim=-1)
+            elif x.shape[-1] == 1:
+                x = x.squeeze(-1)
+
+        if x.dtype == th.uint8:
+            x = x.float() / 255.0
 
         # convolutional layers with ReLU
         x = F.relu(self.conv1(x))
@@ -211,10 +219,14 @@ class Carracing_Callback(ConvertCallback):
             safe_next_shielded = self.shield.get_policy_safety(
                 debug_info["sensor_value"],
                 debug_info["shielded_policy"],
+                debug_info["prev_sensor"],
+                debug_info["prev_action"],
             )
             safe_next_base = self.shield.get_policy_safety(
                 debug_info["sensor_value"],
                 debug_info["base_policy"],
+                debug_info["prev_sensor"],
+                debug_info["prev_action"],
             )
 
         self.shielded_policy_safeties.append(safe_next_shielded)
@@ -352,6 +364,15 @@ class Carracing_Observation_Net(nn.Module):
         :param x: tensor representing the states to extract sensor values from.
         :return: tensor of sensor values in [0, 1]
         """
+
+        if x.dim() == 5:
+            if x.shape[-1] == 3:
+                x = x.mean(dim=-1)
+            elif x.shape[-1] == 1:
+                x = x.squeeze(-1)
+
+        if x.dtype == th.uint8:
+            x = x.float() / 255.0
 
         # x's dimensions: (input, number of stacked images in the input, width and height)
         x = x[:, 0:1, :, :]

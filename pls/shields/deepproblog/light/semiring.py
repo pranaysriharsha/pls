@@ -40,9 +40,16 @@ class GraphSemiring(Semiring):
 
     def value(self, a):
         """Transform the given external value into an internal value."""
-        i = int(a.args[0])
-        v = self.weights[a.functor][:, i : i + 1]
-        return v
+        try:
+            i = int(a.args[0])
+            v = self.weights[a.functor][:, i : i + 1]
+            return v
+        except IndexError:
+            import torch
+            v_float = float(a.value)
+            first_weight = next(iter(self.weights.values()))
+            v = torch.full((first_weight.shape[0], 1), v_float, device=first_weight.device, dtype=first_weight.dtype)
+            return v
 
 class SemiringProbability_custom(SemiringProbability):
     def __init__(self):
@@ -55,6 +62,13 @@ class SemiringProbability_custom(SemiringProbability):
 
     def value(self, a):
         """Transform the given external value into an internal value."""
-        i = int(a.args[0])
-        v = self.weights[a.functor][:, i : i + 1]
-        return v
+        try:
+            i = int(a.args[0])
+            v = self.weights[a.functor][:, i : i + 1]
+            return v
+        except IndexError:
+            import torch
+            v_float = float(a.value)
+            first_weight = next(iter(self.weights.values()))
+            v = torch.full((first_weight.shape[0], 1), v_float, device=first_weight.device, dtype=first_weight.dtype)
+            return v

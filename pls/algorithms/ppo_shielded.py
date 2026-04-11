@@ -58,6 +58,9 @@ class ActorCriticPolicy_shielded(ActorCriticPolicy):
         self.debug_info = {}
         # info is written by self.evaluate_actions() and used by PPO to compute the loss
         self.info = {}
+        
+        self.prev_sensor_values = None
+        self.prev_actions = None
 
         self._build(lr_schedule)
 
@@ -85,49 +88,54 @@ class ActorCriticPolicy_shielded(ActorCriticPolicy):
             sensor_values = self.get_sensor_value_ground_truth(input=x)
         else:
             sensor_values = self.shield.get_sensor_values(x)
+            
+        if self.prev_sensor_values is None:
+            self.prev_sensor_values = sensor_values.detach().clone()
+            self.prev_actions = th.zeros_like(base_actions)
 
-        self.debug_info = {"sensor_value": sensor_values, "base_policy": base_actions}
+        self.debug_info = {
+            "sensor_value": sensor_values, 
+            "base_policy": base_actions,
+            "prev_sensor": self.prev_sensor_values,
+            "prev_action": self.prev_actions
+        }
 
         if self.shield is None:
             actions = distribution.get_actions(deterministic=deterministic)
             log_prob = distribution.log_prob(actions)
             self.debug_info["shielded_policy"] = base_actions
 
+            self.prev_sensor_values = sensor_values.detach()
+            self.prev_actions = th.nn.functional.one_hot(actions, num_classes=base_actions.shape[-1]).float()
+
             return (actions, values, log_prob)
 
         elif self.shield.differentiable:  # PLPG
             # compute the shielded policy
-            actions = self.shield.get_shielded_policy(base_actions, sensor_values)
-            shielded_policy = Categorical(probs=actions)
+            shielded_actions = self.shield.get_shielded_policy(base_actions, sensor_values, self.prev_sensor_values, self.prev_actions)
 
-            # get the most probable action of the shielded policy if we want to use a deterministic policy,
-            # otherwuse, sample an action
-            if deterministic:
-                actions = th.argmax(shielded_policy.probs, dim=1)
-            else:
-                actions = shielded_policy.sample()
+            actions = distribution.get_actions(deterministic=deterministic)
+            log_prob = distribution.log_prob(actions)
+            
+            self.debug_info["shielded_policy"] = shielded_actions
 
-            log_prob = shielded_policy.log_prob(actions)
-            self.debug_info["shielded_policy"] = shielded_policy.probs
+            self.prev_sensor_values = sensor_values.detach()
+            self.prev_actions = th.nn.functional.one_hot(actions, num_classes=base_actions.shape[-1]).float()
 
             return (actions, values, log_prob)
 
         else:  # VSRL
             with th.no_grad():
-                actions = self.shield.get_shielded_policy_vsrl(
-                    base_actions, sensor_values
+                shielded_actions = self.shield.get_shielded_policy_vsrl(
+                    base_actions, sensor_values, self.prev_sensor_values, self.prev_actions
                 )
-                shielded_policy = Categorical(probs=actions)
 
-                # get the most probable action of the shielded policy if we want to use a deterministic policy,
-                # otherwuse, sample an action
-                if deterministic:
-                    actions = th.argmax(shielded_policy.probs, dim=1)
-                else:
-                    actions = shielded_policy.sample()
-
+                actions = distribution.get_actions(deterministic=deterministic)
                 log_prob = distribution.log_prob(actions)
-                self.debug_info["shielded_policy"] = shielded_policy.probs
+                self.debug_info["shielded_policy"] = shielded_actions
+
+                self.prev_sensor_values = sensor_values.detach()
+                self.prev_actions = th.nn.functional.one_hot(actions, num_classes=base_actions.shape[-1]).float()
 
                 return (actions, values, log_prob)
 
@@ -156,30 +164,56 @@ class ActorCriticPolicy_shielded(ActorCriticPolicy):
 
         base_actions = distribution.distribution.probs
 
-        if self.shield is None or not self.shield.differentiable:
+        if self.shield is None:
             sensor_values = self.get_sensor_value_ground_truth(input=x)
+        else:
+            sensor_values = self.shield.get_sensor_values(x)
+            
+        if self.prev_sensor_values is None:
+            self.prev_sensor_values = sensor_values.detach().clone()
+            self.prev_actions = th.zeros_like(base_actions)
+
+        self.info = {
+            "sensor_value": sensor_values, 
+            "base_policy": base_actions,
+            "prev_sensor": self.prev_sensor_values,
+            "prev_action": self.prev_actions
+        }
+
+        if self.shield is None:
             log_prob = distribution.log_prob(actions)
-
-            self.info = {"sensor_value": sensor_values, "base_policy": base_actions}
-
             return (values, log_prob, distribution.entropy())
 
         elif self.shield.differentiable:  # PLPG
-            sensor_values = self.shield.get_sensor_values(x)
             # compute the shielded policy
-            shielded_actions = self.shield.get_shielded_policy(base_actions, sensor_values)
-            shielded_policy = Categorical(probs=shielded_actions)
-            log_prob = shielded_policy.log_prob(actions)
+            shielded_actions = self.shield.get_shielded_policy(base_actions, sensor_values, self.prev_sensor_values, self.prev_actions)
 
-            self.info = {"sensor_value": sensor_values, "base_policy": base_actions}
+            p = base_actions
+            q = shielded_actions
+            p_safe = p.clamp(min=1e-8)
+            q_safe = q.clamp(min=1e-8)
+            m_safe = 0.5 * (p_safe + q_safe)
+            js_div = 0.5 * (p * (p_safe.log() - m_safe.log())).sum(dim=1) + 0.5 * (q * (q_safe.log() - m_safe.log())).sum(dim=1)
+            self.info["js_divergence"] = js_div
 
-            return (values, log_prob, shielded_policy.entropy())
-        else:  # VSRL
-            sensor_values = self.shield.get_sensor_values(x)
             log_prob = distribution.log_prob(actions)
+            return (values, log_prob, distribution.entropy())
 
-            self.info = {"sensor_value": sensor_values, "base_policy": base_actions}
+        else:  # VSRL
+            with th.no_grad():
+                shielded_actions = self.shield.get_shielded_policy_vsrl(
+                    base_actions, sensor_values, self.prev_sensor_values, self.prev_actions
+                )
 
+            p = base_actions
+            q = shielded_actions
+            p_safe = p.clamp(min=1e-8)
+            q_safe = q.clamp(min=1e-8)
+            m_safe = 0.5 * (p_safe + q_safe)
+            js_div = 0.5 * (p * (p_safe.log() - m_safe.log())).sum(dim=1) + 0.5 * (q * (q_safe.log() - m_safe.log())).sum(dim=1)
+            self.info["js_divergence"] = js_div
+
+            log_prob = distribution.log_prob(actions)
             return (values, log_prob, distribution.entropy())
 
 
@@ -225,6 +259,7 @@ class PPO_shielded(PPO):
         pg_losses, value_losses = [], []
         clip_fractions = []
         safety_losses = []  # safety loss
+        js_divergences = [] # JS divergence
 
         continue_training = True
 
@@ -245,6 +280,8 @@ class PPO_shielded(PPO):
                 values, log_prob, entropy = self.policy.evaluate_actions(
                     rollout_data.observations, actions
                 )
+                if "js_divergence" in self.policy.info:
+                    js_divergences.append(self.policy.info["js_divergence"].mean().item())
                 values = values.flatten()
                 # Normalize advantage
                 advantages = rollout_data.advantages
@@ -292,7 +329,10 @@ class PPO_shielded(PPO):
 
                 ####### Safety loss ###########################################
                 policy_safeties = self.policy_safety_calculater.get_policy_safety(
-                    self.policy.info["sensor_value"], self.policy.info["base_policy"]
+                    self.policy.info["sensor_value"], 
+                    self.policy.info["base_policy"],
+                    self.policy.info["prev_sensor"],
+                    self.policy.info["prev_action"]
                 )
                 policy_safeties = policy_safeties.flatten()
                 safety_loss = -th.log(policy_safeties)
@@ -348,6 +388,8 @@ class PPO_shielded(PPO):
         self.logger.record("train/policy_gradient_loss", np.mean(pg_losses))
         self.logger.record("train/value_loss", np.mean(value_losses))
         self.logger.record("train/safety_loss", np.mean(safety_losses))
+        if js_divergences:
+            self.logger.record("train/js_divergence", np.mean(js_divergences))
         self.logger.record("train/approx_kl", np.mean(approx_kl_divs))
         self.logger.record("train/clip_fraction", np.mean(clip_fractions))
         self.logger.record("train/loss", loss.item())
