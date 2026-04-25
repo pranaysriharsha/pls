@@ -114,8 +114,12 @@ class ActorCriticPolicy_shielded(ActorCriticPolicy):
             # compute the shielded policy
             shielded_actions = self.shield.get_shielded_policy(base_actions, sensor_values, self.prev_sensor_values, self.prev_actions)
 
-            actions = distribution.get_actions(deterministic=deterministic)
-            log_prob = distribution.log_prob(actions)
+            dist = Categorical(probs=shielded_actions)
+            if deterministic:
+                actions = th.argmax(shielded_actions, dim=1)
+            else:
+                actions = dist.sample()
+            log_prob = dist.log_prob(actions)
             
             self.debug_info["shielded_policy"] = shielded_actions
 
@@ -130,7 +134,11 @@ class ActorCriticPolicy_shielded(ActorCriticPolicy):
                     base_actions, sensor_values, self.prev_sensor_values, self.prev_actions
                 )
 
-                actions = distribution.get_actions(deterministic=deterministic)
+                dist = Categorical(probs=shielded_actions)
+                if deterministic:
+                    actions = th.argmax(shielded_actions, dim=1)
+                else:
+                    actions = dist.sample()
                 log_prob = distribution.log_prob(actions)
                 self.debug_info["shielded_policy"] = shielded_actions
 
@@ -196,8 +204,9 @@ class ActorCriticPolicy_shielded(ActorCriticPolicy):
             js_div = 0.5 * (p * (p_safe.log() - m_safe.log())).sum(dim=1) + 0.5 * (q * (q_safe.log() - m_safe.log())).sum(dim=1)
             self.info["js_divergence"] = js_div
 
-            log_prob = distribution.log_prob(actions)
-            return (values, log_prob, distribution.entropy())
+            dist = Categorical(probs=shielded_actions)
+            log_prob = dist.log_prob(actions)
+            return (values, log_prob, dist.entropy())
 
         else:  # VSRL
             with th.no_grad():

@@ -24,10 +24,34 @@ prev_sensor(2)::prev_grass(on_the_right).
 
 
 % transition
-unsafe_next :- grass(on_the_left), \+ grass(on_the_right), action(turn_left).
-unsafe_next :- grass(on_the_left), \+ grass(on_the_right), action(accelerate).
-unsafe_next :- \+ grass(on_the_left), grass(on_the_right), action(turn_right).
-unsafe_next :- \+ grass(on_the_left), grass(on_the_right), action(accelerate).
+unsafe1 :- grass(on_the_left), \+ grass(on_the_right), action(turn_left).
+unsafe1 :- grass(on_the_left), \+ grass(on_the_right), action(accelerate).
+unsafe1 :- \+ grass(on_the_left), grass(on_the_right), action(turn_right).
+unsafe1 :- \+ grass(on_the_left), grass(on_the_right), action(accelerate).
+
+0.5 :: unsafe2 :-
+prev_grass(on_the_left),
+prev_act(turn_left),
+grass(on_the_left),
+action(turn_left),
+\+ grass(on_the_right).
+
+0.5 :: unsafe2 :-
+prev_grass(on_the_right),
+prev_act(turn_right),
+grass(on_the_right),
+action(turn_right),
+\+ grass(on_the_left).
+
+
+0.5 :: unsafe2 :-
+prev_grass(in_front),
+prev_act(accelerate),
+grass(in_front),
+action(accelerate).
+
+unsafe_next :- unsafe1.
+unsafe_next :- unsafe2.
 
 safe_next:- \+unsafe_next.
 safe_action(A):- action(A).
