@@ -42,14 +42,18 @@
         "num_actions": 5,
         "ghost_distance": 2,
         "differentiable": true,
-        "shield_program": "../../../data/pacman_ghosts.pl"
+        "shield_program": "../../../data/pacman_ghosts.pl",
+        "thresholds_file": "../../../data/thresholds.txt",
+        "k": 10.0
     },
     "shield_params": {
         "num_sensors": 4,
         "num_actions": 5,
         "ghost_distance": 2,
         "differentiable": true,
-        "shield_program": "../../../data/pacman_ghosts.pl"
+        "shield_program": "../../../data/pacman_ghosts.pl",
+        "thresholds_file": "../../../data/thresholds.txt",
+        "k": 10.0
     },
     "observation_params": {
         "observation_type": "pretrained",

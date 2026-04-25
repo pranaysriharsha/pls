@@ -1,5 +1,6 @@
 import torch as th
 from pls.shields.deepproblog import DeepProbLogLayer, DeepProbLogLayer_Optimized
+from pls.shields.middleware import Middleware
 from os import path
 from random import random
 
@@ -37,6 +38,8 @@ class Shield:
         differentiable=True,
         observation_net_cls=None,
         vsrl_eps=0,
+        thresholds_file=None,
+        k=10.0,
         **kwargs,
     ):
         if config_folder is None:
@@ -50,7 +53,16 @@ class Shield:
         with open(path.join(config_folder, shield_program)) as f:
             program = f.read()
 
-        debug_query_struct = {"safe_next": 0}
+        # Build Middleware first to read txt parameters securely
+        self.middleware = Middleware(
+            shield_layer=None, 
+            num_actions=self.num_actions, 
+            config_folder=config_folder,
+            thresholds_file=thresholds_file,
+            k=k
+        )
+
+        debug_query_struct = {atom: i for i, atom in enumerate(self.middleware.risk_thresholds.keys())}
         debug_input_struct = {
             "sensor_value": [i for i in range(self.num_sensors)],
             "action": [
@@ -70,6 +82,9 @@ class Shield:
             input_struct=debug_input_struct,
             query_struct=debug_query_struct,
         )
+        
+        # Hydrate backreference inside Middleware locally
+        self.middleware.shield_layer = self.shield_layer
 
         # get sensor values from the pretrained observation network
         if self.observation_type == "pretrained":
@@ -118,67 +133,31 @@ class Shield:
 
     def get_policy_safety(self, sensor_values, base_actions, prev_sensors, prev_actions) -> th.Tensor:
         """
-        Compute how safe it is to follow the given policy given sensor values.
-
-        :param sensor_values: tensor of sensor values (observed or ground truth)
-        :param base_actions: tensor of the action probability distribution
-        :param prev_sensors: tensor of previous step sensor values
-        :param prev_actions: tensor of previous step action one-hot vector
-        :return: probability representing safety
+        Calculates loss variables (expectation variables) if called natively.
         """
-        results = self.shield_layer(
-            x={
-                "sensor_value": sensor_values,
-                "action": base_actions,
-                "prev_sensor": prev_sensors,
-                "prev_action": prev_actions,
-            }
-        )
-        policy_safety = results["safe_next"]
-        return policy_safety
+        #Calculates the action safeties
+        sigma_totals = self.get_action_safeties(sensor_values, prev_sensors, prev_actions)
+        #Calculates the shielded policy
+        pi_plus_unnormalized = sigma_totals * base_actions
+        sum_pi_plus = th.sum(pi_plus_unnormalized, dim=1, keepdim=True)
+        pi_plus = pi_plus_unnormalized / (sum_pi_plus + 1e-8)
+        return th.sum(pi_plus * sigma_totals, dim=1, keepdim=True)
 
     def get_action_safeties(self, sensor_values, prev_sensors, prev_actions) -> th.Tensor:
         """
-        Compute how safe it is to execute an action.
-
-        :param sensor_values: tensor of sensor values (observed or ground truth)
-        :param prev_sensors: tensor of previous step sensor values
-        :param prev_actions: tensor of previous step action one-hot vector
-        :return: tensor of probabilities representing safety of actions
+        Compute how safe it is to execute an action. Let middleware execute it fully.
         """
-        all_actions = th.eye(self.num_actions).unsqueeze(1)
-        action_safeties = []
-        for action in all_actions:
-            base_actions = th.repeat_interleave(action, sensor_values.size(0), dim=0)
-            results = self.shield_layer(
-                x={
-                    "sensor_value": sensor_values,
-                    "action": base_actions,
-                    "prev_sensor": prev_sensors,
-                    "prev_action": prev_actions,
-                }
-            )
-            action_safety = results["safe_next"]
-            action_safeties.append(action_safety)
-        action_safeties = th.cat(action_safeties, dim=1)
-        return action_safeties
+        return self.middleware.get_action_safeties(sensor_values, prev_sensors, prev_actions)
 
     def get_shielded_policy(self, base_actions, sensor_values, prev_sensors, prev_actions) -> th.Tensor:
         """
-        Compute the shielded policy. This function is for differentiable shields.
-
-        :param base_actions: tensor of the action probability distribution
-        :param sensor_values: tensor of sensor values (observed or ground truth)
-        :param prev_sensors: tensor of previous step sensor values
-        :param prev_actions: tensor of previous step action one-hot vector
-        :return: tensor representing the shielded policy
+        Compute the shielded policy statically from internally parsed sigmas securely.
         """
-
         assert self.differentiable is True
 
-        policy_safety = self.get_policy_safety(sensor_values, base_actions, prev_sensors, prev_actions)
         action_safeties = self.get_action_safeties(sensor_values, prev_sensors, prev_actions)
-        actions = action_safeties * base_actions / policy_safety
+        unnormalized_actions = action_safeties * base_actions
+        actions = unnormalized_actions / (th.sum(unnormalized_actions, dim=1, keepdim=True) + 1e-8)
 
         assert actions.max() <= 1.00001, f"{actions} violates MAX"
         assert actions.min() >= -0.00001, f"{actions} violates MIN"

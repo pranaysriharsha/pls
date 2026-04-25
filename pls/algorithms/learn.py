@@ -69,7 +69,7 @@ def main(
     def make_env():
         env = gym.make(config["env"], **config["env_features"])
         # FrameStack only works with Box observation spaces, not Dict
-        if not isinstance(env.observation_space, gym.spaces.Dict):
+        if config["env"] != "CarRacingPLS-v1":
             env = FrameStack(env, 4)
             
         if config["monitor_features"] is not None:

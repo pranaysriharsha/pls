@@ -27,8 +27,14 @@
         "gamma": 0.99,
         "total_timesteps": 700000,
         "net_arch_shared": [],
-        "net_arch_pi": [64, 64],
-        "net_arch_vf": [64, 64],
+        "net_arch_pi": [
+            64,
+            64
+        ],
+        "net_arch_vf": [
+            64,
+            64
+        ],
         "alpha": 0
     },
     "policy_safety_params": {
@@ -36,7 +42,9 @@
         "num_actions": 5,
         "ghost_distance": 2,
         "differentiable": false,
-        "shield_program": "../../../data/pacman_ghosts.pl"
+        "shield_program": "../../../data/pacman_ghosts.pl",
+        "thresholds_file": "../../../data/thresholds.txt",
+        "k": 10.0
     },
     "shield_params": null,
     "observation_params": {

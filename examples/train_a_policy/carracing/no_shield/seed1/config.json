@@ -21,17 +21,25 @@
         "seed": 567,
         "clip_range": 0.1,
         "gamma": 0.99,
-        "total_timesteps": 700000,
+        "total_timesteps": 5000,
         "net_arch_shared": [],
-        "net_arch_pi": [64, 64],
-        "net_arch_vf": [64, 64],
+        "net_arch_pi": [
+            64,
+            64
+        ],
+        "net_arch_vf": [
+            64,
+            64
+        ],
         "alpha": 0
     },
     "policy_safety_params": {
         "num_sensors": 3,
         "num_actions": 5,
         "differentiable": true,
-        "shield_program": "../../../data/carracing_grass.pl"
+        "shield_program": "../../../data/carracing_grass.pl",
+        "thresholds_file": "../../../data/thresholds.txt",
+        "k": 10.0
     },
     "shield_params": null,
     "observation_params": {

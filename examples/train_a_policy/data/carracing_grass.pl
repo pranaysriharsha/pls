@@ -23,11 +23,15 @@ prev_sensor(1)::prev_grass(on_the_left).
 prev_sensor(2)::prev_grass(on_the_right).
 
 
-% transition
-unsafe_next :- grass(on_the_left), \+ grass(on_the_right), action(turn_left).
-unsafe_next :- grass(on_the_left), \+ grass(on_the_right), action(accelerate).
-unsafe_next :- \+ grass(on_the_left), grass(on_the_right), action(turn_right).
-unsafe_next :- \+ grass(on_the_left), grass(on_the_right), action(accelerate).
+% unsafe_1: turning toward the side that has grass (one-sided grass only)
+unsafe_1 :- grass(on_the_left), \+ grass(on_the_right), action(turn_left).
+unsafe_1 :- grass(on_the_right), \+ grass(on_the_left), action(turn_right).
 
-safe_next:- \+unsafe_next.
-safe_action(A):- action(A).
+% unsafe_2: temporal — accelerating into front grass on two consecutive steps
+%   i.e., X̄(grass(in_front) ∧ act(accelerate)) ∧ (grass(in_front) ∧ act(accelerate))
+unsafe_2 :- grass(in_front), action(accelerate), prev_grass(in_front), prev_act(accelerate).
+
+unsafe_next :- unsafe_1; unsafe_2.
+
+safe_next :- \+ unsafe_next.
+safe_action(A) :- action(A).

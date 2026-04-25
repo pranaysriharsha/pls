@@ -114,8 +114,13 @@ class ActorCriticPolicy_shielded(ActorCriticPolicy):
             # compute the shielded policy
             shielded_actions = self.shield.get_shielded_policy(base_actions, sensor_values, self.prev_sensor_values, self.prev_actions)
 
-            actions = distribution.get_actions(deterministic=deterministic)
-            log_prob = distribution.log_prob(actions)
+            dist_shielded = th.distributions.Categorical(probs=shielded_actions)
+            if deterministic:
+                actions = th.argmax(shielded_actions, dim=1)
+            else:
+                actions = dist_shielded.sample()
+                
+            log_prob = dist_shielded.log_prob(actions)
             
             self.debug_info["shielded_policy"] = shielded_actions
 
@@ -130,8 +135,13 @@ class ActorCriticPolicy_shielded(ActorCriticPolicy):
                     base_actions, sensor_values, self.prev_sensor_values, self.prev_actions
                 )
 
-                actions = distribution.get_actions(deterministic=deterministic)
-                log_prob = distribution.log_prob(actions)
+                dist_shielded = th.distributions.Categorical(probs=shielded_actions)
+                if deterministic:
+                    actions = th.argmax(shielded_actions, dim=1)
+                else:
+                    actions = dist_shielded.sample()
+                    
+                log_prob = dist_shielded.log_prob(actions)
                 self.debug_info["shielded_policy"] = shielded_actions
 
                 self.prev_sensor_values = sensor_values.detach()
@@ -187,6 +197,9 @@ class ActorCriticPolicy_shielded(ActorCriticPolicy):
         elif self.shield.differentiable:  # PLPG
             # compute the shielded policy
             shielded_actions = self.shield.get_shielded_policy(base_actions, sensor_values, self.prev_sensor_values, self.prev_actions)
+            self.info["shielded_policy"] = shielded_actions
+            
+            dist_shielded = th.distributions.Categorical(probs=shielded_actions)
 
             p = base_actions
             q = shielded_actions
@@ -196,14 +209,17 @@ class ActorCriticPolicy_shielded(ActorCriticPolicy):
             js_div = 0.5 * (p * (p_safe.log() - m_safe.log())).sum(dim=1) + 0.5 * (q * (q_safe.log() - m_safe.log())).sum(dim=1)
             self.info["js_divergence"] = js_div
 
-            log_prob = distribution.log_prob(actions)
-            return (values, log_prob, distribution.entropy())
+            log_prob = dist_shielded.log_prob(actions)
+            return (values, log_prob, dist_shielded.entropy())
 
         else:  # VSRL
             with th.no_grad():
                 shielded_actions = self.shield.get_shielded_policy_vsrl(
                     base_actions, sensor_values, self.prev_sensor_values, self.prev_actions
                 )
+            self.info["shielded_policy"] = shielded_actions
+            
+            dist_shielded = th.distributions.Categorical(probs=shielded_actions)
 
             p = base_actions
             q = shielded_actions
@@ -213,8 +229,8 @@ class ActorCriticPolicy_shielded(ActorCriticPolicy):
             js_div = 0.5 * (p * (p_safe.log() - m_safe.log())).sum(dim=1) + 0.5 * (q * (q_safe.log() - m_safe.log())).sum(dim=1)
             self.info["js_divergence"] = js_div
 
-            log_prob = distribution.log_prob(actions)
-            return (values, log_prob, distribution.entropy())
+            log_prob = dist_shielded.log_prob(actions)
+            return (values, log_prob, dist_shielded.entropy())
 
 
 class PPO_shielded(PPO):
@@ -328,15 +344,25 @@ class PPO_shielded(PPO):
                 entropy_losses.append(entropy_loss.item())
 
                 ####### Safety loss ###########################################
-                policy_safeties = self.policy_safety_calculater.get_policy_safety(
-                    self.policy.info["sensor_value"], 
-                    self.policy.info["base_policy"],
-                    self.policy.info["prev_sensor"],
-                    self.policy.info["prev_action"]
-                )
-                policy_safeties = policy_safeties.flatten()
-                safety_loss = -th.log(policy_safeties)
-                safety_loss = th.mean(safety_loss)
+                if "shielded_policy" in self.policy.info:
+                    pi_plus = self.policy.info["shielded_policy"]
+                    
+                    # gets the action safeties from the middleware
+                    sigma_totals = self.policy_safety_calculater.get_action_safeties(
+                        self.policy.info["sensor_value"], 
+                        self.policy.info["prev_sensor"],
+                        self.policy.info["prev_action"]
+                    )
+                    
+                    # Calculate the expected safety E[sigma(s,a)]=summation of pi_plus * sigma_totals
+                    expected_safety = th.sum(pi_plus * sigma_totals, dim=1)
+                    
+                    # safety loss= -log[E[sigma(s,a)]]
+                    safety_loss = -th.log(expected_safety + 1e-8)
+                    safety_loss = th.mean(safety_loss)
+                else:
+                    safety_loss = th.tensor(0.0).to(self.device)
+                
                 safety_losses.append(safety_loss.item())
 
                 loss = (
